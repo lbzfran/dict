@@ -1,15 +1,23 @@
+/*
+ * ---------------
+ * Liam Bagabag
+ * Version: 1.2
+ * ---------------
+ */
 #ifndef RANDOM_H
 #define RANDOM_H
 
-/*#include "base.h"*/
+#ifndef ArrayCount
+# define ArrayCount(a) (sizeof(a)/sizeof(*(a)))
+#endif
 
 typedef struct random_series {
     unsigned int index;
 } RandomSeries;
 
-RandomSeries RandomSeed(uint value);
-uint RandomNextInt(RandomSeries* series);
-uint RandomChoice(RandomSeries* series, uint N);
+RandomSeries RandomSeed(unsigned int value);
+unsigned int RandomNextInt(RandomSeries* series);
+unsigned int RandomChoice(RandomSeries* series, unsigned int N);
 float RandomUnilateral(RandomSeries* series);
 float RandomBilateral(RandomSeries* series);
 float RandomLerp(float A, float t, float B);
@@ -51,30 +59,30 @@ static int RandomNumberTable[] = {
 };
 
 inline RandomSeries
-RandomSeed(uint value)
+RandomSeed(unsigned int value)
 {
     RandomSeries series;
     series.index = (value % ArrayCount(RandomNumberTable));
     return(series);
 }
 
-inline uint
+inline unsigned int
 RandomNextInt(RandomSeries* series)
 {
     // returns current value of index, and increments index position.
-    uint res = RandomNumberTable[series->index++];
+    unsigned int res = RandomNumberTable[series->index++];
     if (series->index == ArrayCount(RandomNumberTable)) {
         series->index = 0;
     }
     return(res);
 }
 
-inline uint
-RandomChoice(RandomSeries* series, uint N)
+inline unsigned int
+RandomChoice(RandomSeries* series, unsigned int N)
 {
     // random choice between [0, N).
 
-    uint res = (RandomNextInt(series) % N);
+    unsigned int res = (RandomNextInt(series) % N);
 
     return(res);
 }

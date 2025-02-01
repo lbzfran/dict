@@ -1,7 +1,7 @@
 /*
  * ---------------
  * Liam Bagabag
- * Version: B2.2
+ * Version: B2.3
  * Requires: none (inline)
  * ---------------
  */
@@ -94,7 +94,7 @@ typedef struct memory_arena_temp {
 } ArenaTemp;
 
 void* ArenaPush(Arena*, memory_index, memory_index);
-void* ArenaCopy(memory_index, void*, Arena*);
+void* ArenaCopy(memory_index, void*, void*);
 ArenaFooter* GetFooter(Arena* arena);
 
 memory_index ArenaGetEffectiveSize(Arena* arena, memory_index sizeInit, memory_index alignment);
@@ -107,13 +107,13 @@ void ArenaFreeCurrentBlock(Arena* arena);
 #define PushArray(arena, t, c) (t*)ArenaPush((arena),sizeof(t)*(c), alignof(t))
 #define PushStruct(arena, t) PushArray(arena, t, 1)
 #define PushSize(arena, s) ArenaPush((arena), (s), alignof(s))
-#define PushCopy(arena, s, src) (ArenaCopy(s, src, ArenaPush(arena, s, alignof(s)))
+#define PushCopy(arena, s, src) ArenaCopy(s, src, ArenaPush(arena, s, alignof(s)))
 
 // NOTE(liam): Set Alignment Manually.
 #define PushArrayAlign(arena, t, c, ...) (t*)ArenaPush((arena),sizeof(t)*(c), ## __VA_ARGS__)
 #define PushStructAlign(arena, t, ...) PushArray(arena, t, ## __VA_ARGS__)
 #define PushSizeAlign(arena, s, ...) ArenaPush((arena), (s), ## __VA_ARGS__)
-#define PushCopyAlign(arena, s, src, ...) (ArenaCopy(s, src, ArenaPush(arena, s, ## __VA_ARGS__))
+#define PushCopyAlign(arena, s, src, ...) ArenaCopy(s, src, ArenaPush(arena, s, ## __VA_ARGS__))
 void ArenaFillZero(memory_index size, void *ptr);
 
 uint64 ArenaGetPos(Arena*);
@@ -251,6 +251,18 @@ ArenaPush(Arena* arena, memory_index sizeInit, memory_index alignment)
     return(res);
 }
 
+inline void*
+ArenaCopy(memory_index size, void* src, void* dst)
+{
+    uint8* srcPos = (uint8*)src;
+    uint8* dstPos = (uint8*)dst;
+    while (size--)
+    {
+        *dstPos++ = *srcPos++;
+    }
+    return(dst);
+}
+
 inline void
 SubArena(Arena* subArena, Arena* arena, memory_index size, memory_index alignment)
 {
@@ -296,7 +308,7 @@ inline void
 ArenaFreeCurrentBlock(Arena* arena)
 {
     void* freedBlock = arena->base;
-    memory_index freedBlockSize = arena->size;
+    memory_index __attribute__((unused)) freedBlockSize = arena->size;
 
     ArenaFooter* footer = GetFooter(arena);
 
