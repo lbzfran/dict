@@ -3,9 +3,17 @@
 
 #include "arena.h"
 
+// TODO(liam): stuck on how dictionary should handle collisions.
+// Likely linked list, but need to pin down the how of it.
+
+typedef struct DictLinkedList {
+    uint32 hash;
+    uint32 value;
+    struct DictLinkedList* next;
+} DictLinkedList;
+
 typedef struct {
-    uint32* keys;
-    uint32* values;
+    DictLinkedList* values; // size of keys.
     memory_index size;
     memory_index capacity;
     memory_index minimumDictSize;
@@ -32,36 +40,83 @@ extern dict_lib const dict;
 
 #include "random.h"
 
-
 static Arena dict_arena = {0};
 static RandomSeries dict_series = {0};
 
-static uint32 DictHash(uint32 x, memory_index m)
+#define rot(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
+
+#define mix(a,b,c) \
+{ \
+  a -= c;  a ^= rot(c, 4);  c += b; \
+  b -= a;  b ^= rot(a, 6);  a += c; \
+  c -= b;  c ^= rot(b, 8);  b += a; \
+  a -= c;  a ^= rot(c,16);  c += b; \
+  b -= a;  b ^= rot(a,19);  a += c; \
+  c -= b;  c ^= rot(b, 4);  b += a; \
+}
+
+#define final(a,b,c) \
+{ \
+  c ^= b; c -= rot(b,14); \
+  a ^= c; a -= rot(c,11); \
+  b ^= a; b -= rot(a,25); \
+  c ^= b; c -= rot(b,16); \
+  a ^= c; a -= rot(c,4);  \
+  b ^= a; b -= rot(a,14); \
+  c ^= b; c -= rot(b,24); \
+}
+
+static uint32_t lookup3(const void *key, size_t length, uint32_t initval)
 {
-    // NOTE(liam): implements 2-independent hashing.
-    static uint32 a = 0, b = 0;
-    uint32 res;
+    uint32_t  a,b,c;
+    const uint8_t  *k;
+    const uint32_t *data32Bit;
 
-    if (!a && !b)
-    {
-        if (!dict_series.index)
-        {
-            dict_series = RandomSeed(999);
-        }
-        a = RandomChoice(&dict_series, 999) % m;
-        b = RandomChoice(&dict_series, 999) % m;
-    }
-    if (!x)
-    {
-        res = 0;
-    }
-    else
-    {
-        res = (uint32)((a * x + b) % m);
-        if (!res) res = 0;
+    data32Bit = key;
+    a = b = c = 0xdeadbeef + (((uint32_t)length)<<2) + initval;
+
+    while (length > 12) {
+        a += *(data32Bit++);
+        b += *(data32Bit++);
+        c += *(data32Bit++);
+        mix(a,b,c);
+        length -= 12;
     }
 
+    k = (const uint8_t *)data32Bit;
+    switch (length) {
+        case 12: c += ((uint32_t)k[11])<<24;
+        case 11: c += ((uint32_t)k[10])<<16;
+        case 10: c += ((uint32_t)k[9])<<8;
+        case 9 : c += k[8];
+        case 8 : b += ((uint32_t)k[7])<<24;
+        case 7 : b += ((uint32_t)k[6])<<16;
+        case 6 : b += ((uint32_t)k[5])<<8;
+        case 5 : b += k[4];
+        case 4 : a += ((uint32_t)k[3])<<24;
+        case 3 : a += ((uint32_t)k[2])<<16;
+        case 2 : a += ((uint32_t)k[1])<<8;
+        case 1 : a += k[0];
+                 break;
+        case 0 : return c;
+    }
+    final(a,b,c);
+    return c;
+}
+
+static uint32 DictHash(uint32 key, uint32 size)
+{
+    uint32 initval;
+    uint32 hashAddress;
+
+    initval = 12345;
+    hashAddress = lookup3(&key, 1, initval);
+    uint32 res = (hashAddress & (size - 1));
+    printf("HASH: in: %d, out: %d\n", key, res);
     return res;
+    // If hashtable is guaranteed to always have a size that is a power of 2,
+    // replace the line above with the following more effective line:
+    //     return (hashAddress & (hashTableSize - 1));
 }
 
 static void DictSetMinimumSize(DictStruct* dict, memory_index size)
@@ -84,27 +139,37 @@ static void DictAdd(DictStruct* dict, uint32 key, uint32 value)
         // so this tradeoff is okay on average.
         // If anything, we can just adjust the minimum size
         // as necessary for the workload.
-        memory_index lastCapacity = dict->capacity;
-        dict->capacity = Max(dict->capacity * 2, dict->minimumDictSize);
+        memory_index newCap = Max(dict->capacity * 2, dict->minimumDictSize);
 
-        uint32* newKeys = PushArray(&dict_arena, uint32, dict->capacity);
-        uint32* newValues = PushArray(&dict_arena, uint32, dict->capacity);
+        uint32* newKeys = PushArray(&dict_arena, uint32, newCap);
+        DictLinkedList* newValues = PushArray(&dict_arena, struct DictLinkedList, newCap);
 
-        if (lastCapacity)
+        if (dict->capacity)
         {
             //TODO(liam): properly rehash everything.
-            memory_index sizePos = lastCapacity + 1;
-            while (--sizePos)
+            memory_index sizePos = dict->capacity;
+            uint32* oldKey = dict->keys;
+            while (sizePos--)
             {
-                uint32* oldKey = dict->keys + sizePos;
                 uint32 oldHash = *oldKey;
 
-                uint32 oldValue = *(dict->values + *oldKey);
+                uint32 oldValue = *(dict->values + oldHash);
 
-                printf("key: %lu | value: %d | hash: %d\n", sizePos, oldValue, oldHash);
+
+
+                if (oldValue)
+                {
+                    printf("value: %u | key: %ld | hash: %d\n", oldValue, sizePos, oldHash);
+                    uint32 newHash = DictHash(sizePos, newCap);
+                    *(newKeys + sizePos) = newHash;
+                    *(newValues + newHash) = value;
+                }
+
+                oldKey++;
             }
         }
 
+        dict->capacity = newCap;
         dict->keys = newKeys;
         dict->values = newValues;
 
@@ -113,10 +178,16 @@ static void DictAdd(DictStruct* dict, uint32 key, uint32 value)
 
     uint32 hashed_key = DictHash(key, dict->capacity);
 
-    *(dict->keys + key) = hashed_key;
+    uint32* keyPos = (dict->keys + key);
+    // NOTE(liam): don't change size if we're replacing existing entry.
+    if (!(*keyPos)) {
+        /*static int counter = 0;*/
+        /*printf("new entry! %d\n", counter++);*/
+        dict->size++;
+    }
+    *keyPos = hashed_key;
 
-    *(dict->values + hashed_key) = value;
-    dict->size++;
+    *(dict->values + hashed_key).value = value;
 
     /*printf("Occupied %d at %d\n", hashed_key, dict->values[hashed_key]);*/
 }
@@ -177,8 +248,7 @@ static uint32 DictPop(DictStruct* dict, uint32 key)
 
 static void DictClear(DictStruct* dict)
 {
-    dict->keys = NULL;
-    dict->values = NULL;
+    // NOTE(liam): effective reset. Does not change capacity.
     dict->size = 0;
 }
 

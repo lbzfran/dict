@@ -22,7 +22,7 @@ int main(void)
     dict.add(&d, 17, 6969);
     dict.add(&d, 18, 6969);
     dict.add(&d, 19, 6969);
-    for (int i = 0; i < 65; i++)
+    for (int i = 0; i < 48; i++)
     {
         dict.add(&d, RandomBetween(&local_series, 20, 999), RandomBetween(&local_series, 20, 999));
     }
